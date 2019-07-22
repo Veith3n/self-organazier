@@ -1,3 +1,21 @@
+aliases:
+  restore_cache: &restore_cache
+    restore_cache:
+      name: Restore Npm Package Cache
+      key: dependency-cache-{{ checksum "package.json" }}
+
+  install_node_modules: &install_node_modules
+    run:
+      name: Install dependencies
+      command: npm install
+
+  save_cache: &save_cache
+    save_cache:
+      name: Save NPM package cache
+      key: dependency-cache-{{ checksum "package.json" }}
+      paths:
+        - ./node_modules
+
 version: 2
 jobs:
   build:
@@ -6,15 +24,56 @@ jobs:
       - image: circleci/node:10
     steps:
       - checkout
-      - restore_cache:
-          key: dependency-cache-{{ checksum "package.json" }}
+      - <<: *restore_cache
+      - <<: *install_node_modules
       - run:
-          name: Install Dependencies
-          command: npm install
-      - save_cache:
-          key: dependency-cache-{{ checksum "package.json" }}
+          name: Build
+          command: npm run build
+      - persist_to_workspace:
+          root: ./
           paths:
-            - ./node_modules 
+            - build
+  test:
+    working_directory: ~/self-organizer
+    docker:
+      - image: circleci/node:10
+    steps:
+      - checkout
+      - <<: *restore_cache
+      - <<: *install_node_modules
+      - <<: *save_cache
       - run:
           name: Run Tests
-          command: npm test
+          command: npm test  
+  deploy:
+    working_directory: ~/self-organizer
+    docker:
+      - image: circleci/node:10    
+    steps:
+      - checkout
+      # Attach the persisted built files.
+      - attach_workspace:
+          at: ./
+      - <<: *restore_cache
+      - <<: *install_node_modules
+      - run:
+          name: Install netlify-cli
+          command: sudo npm install -g --silent netlify-cli
+      - run:
+          name: Deploy to Netlify
+          command: netlify deploy --dir=./build -p
+
+workflows:
+  version: 2
+  build_and_deploy:
+    jobs:
+      - build
+      - test:
+          requires:
+            - build
+      - deploy:
+          requires:
+            - test
+          filters:
+            branches:
+              only: master          
